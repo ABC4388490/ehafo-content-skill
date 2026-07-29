@@ -23,7 +23,7 @@ BANNED_MARKETING = (
 REQUIRED_TOP = (
     "status", "topic", "audience", "problem", "action", "verification_date",
     "claims", "topic_selection", "user_task", "user_test", "value_evidence",
-    "format_decision", "outputs",
+    "format_decision", "production_gates", "outputs",
 )
 REQUIRED_CLAIM = (
     "id", "text", "risk", "exam", "year", "region", "official",
@@ -59,6 +59,11 @@ BRAND_PROMO_ASSET = "assets/ehafo-brand-promo.png"
 BRAND_PROMO_SHA256 = (
     "56f998e0802d34b23077036160f380e4fd14bda1fbf5e192fae8222f69f1343c"
 )
+ALLOWED_ASSET_TYPES = {"article_illustration", "service_account_cards"}
+ACCEPTANCE_DIMENSIONS = (
+    "content_accuracy", "readable_size", "aspect_ratio",
+    "asset_integrity", "mobile_preview",
+)
 
 
 def valid_date(value: object) -> bool:
@@ -71,6 +76,35 @@ def valid_date(value: object) -> bool:
 
 def visible_length(value: str) -> int:
     return len(re.sub(r"\s+", "", value))
+
+
+def validate_production_gates(gates: object) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(gates, dict):
+        return ["production_gates:must_be_object"]
+
+    if gates.get("declared_before_generation") is not True:
+        errors.append("production_gates:type_must_be_declared_before_generation")
+    asset_type = gates.get("asset_type")
+    if asset_type not in ALLOWED_ASSET_TYPES:
+        errors.append("production_gates:invalid_asset_type")
+    if gates.get("template_type") != asset_type:
+        errors.append("production_gates:template_type_must_match_asset_type")
+    if gates.get("scope_verified") is not True:
+        errors.append("production_gates:edit_scope_not_verified")
+    if gates.get("locked_assets_verified") is not True:
+        errors.append("production_gates:locked_assets_not_verified")
+
+    acceptance = gates.get("acceptance")
+    if not isinstance(acceptance, dict):
+        errors.append("production_gates:acceptance_must_be_object")
+    else:
+        for dimension in ACCEPTANCE_DIMENSIONS:
+            if acceptance.get(dimension) != "pass":
+                errors.append(
+                    f"production_gates:acceptance_not_passed:{dimension}"
+                )
+    return errors
 
 
 def main() -> int:
@@ -88,6 +122,8 @@ def main() -> int:
     for key in REQUIRED_TOP:
         if key not in data or data[key] in (None, "", []):
             errors.append(f"missing:{key}")
+
+    errors.extend(validate_production_gates(data.get("production_gates")))
 
     status = data.get("status")
     allowed_statuses = {

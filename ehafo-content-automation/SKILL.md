@@ -68,6 +68,15 @@ description: 自动为易哈佛微信服务号完成医学考试内容选题、�
 
 信息不足时不要先追问。先在问题中心、用户知识库和官方来源中补齐；考试、地区或目标形式未指定时均由系统比较后决定。只有存在无法消解的互斥业务约束，或缺少不可替代的私有素材/权限时，才询问一个最关键问题。
 
+## 图片生产四道硬门禁
+
+任何新建或修改图片的任务都必须依次通过以下四道门禁。门禁未记录、未验证或任一项失败时，立即停止交付并进入 `BLOCKED`；不得用目视感觉、口头声明或后续补检代替。
+
+1. **先声明类型**：生成或修改前，必须在验证包的 `production_gates` 中把 `asset_type` 和 `template_type` 明确声明为 `article_illustration`（文章正文插图）或 `service_account_cards`（服务号贴图），两者必须相同。类型未声明前不得选择画布、模板、Logo、信息密度或导入方式；禁止混用两类模板。
+2. **锁定固定资产**：原始 Logo、固定顶部图、固定底部图和固定品牌尾图默认全部不可编辑，只能原样插入。任务开始前记录其 SHA-256，结束后再次核对；调整正文信息图或其他图片不得波及这些资产。只有用户明确把某个固定资产作为独立修改目标，并完成该资产规则要求的确认流程时，才可解除对应锁定。
+3. **限定修改白名单**：修改任务开始前，先用 `scripts/verify_edit_scope.py snapshot` 保存项目文件指纹；再把用户明确要求修改的组件或文件逐项列入 `--allow`。完成后使用 `verify` 检查：新增、删除或修改任何白名单外文件均失败；所有锁定资产必须通过 `--lock` 复核。用户只要求改正文信息图时，白名单只能包含该正文信息图组件及其直接生成物，不得顺带修改 HTML、其他图片组件、固定资产或共享模板。
+4. **多维验收**：交付前必须同时把内容准确、实际可读尺寸、图片比例、资产完整性和约 390px 手机端效果记录为 `pass`。五项中任何一项缺失或不合格都不得交付；脚本通过不能替代手机端目视验收，目视正常也不能替代事实、比例、指纹和修改范围检查。
+
 ## 生产流程
 
 ### 1. 建立候选选题
@@ -196,10 +205,14 @@ description: 自动为易哈佛微信服务号完成医学考试内容选题、�
 把事实卡和成品信息写入 JSON，运行：
 
 ```bash
+python3 scripts/verify_edit_scope.py snapshot path/to/project --output /tmp/edit-baseline.json
 python3 scripts/validate_package.py package.json
 python3 scripts/check_image_density.py path/to/remotion-image-1.png path/to/remotion-image-2.png
 python3 scripts/check_article_image_scale.py path/to/header.png path/to/remotion-image.png path/to/footer.png
+python3 scripts/verify_edit_scope.py verify path/to/project --baseline /tmp/edit-baseline.json --allow src/TargetIllustration.tsx --lock public/ehafo-article-header.png=23081faf27778eb9372fccfe4ae82e7a7b48f748a0e5a3327e2c5de02b4a64c9 --lock public/ehafo-article-footer.png=e7ba40c3e1742c10958a91a764a8ab42a9eaab2352cd1f87cb260399cd4ec84d
 ```
+
+`snapshot` 必须在任何文件修改前运行，`verify` 必须在渲染和交付前运行。`--allow` 使用相对项目根目录的精确文件路径，可重复传入；`--lock` 使用 `相对路径=预期SHA-256`，列出项目内所有固定资产，同时证明资产前后未变且仍是认可的原文件。验证包中的 `production_gates.scope_verified` 和 `locked_assets_verified` 只有在 `verify` 返回 `ok: true` 后才可写为 `true`。
 
 只对新生成的 Remotion 文章正文信息图运行 `check_image_density.py`；服务号贴图及固定品牌首尾图不得使用该脚本判定合格。贴图按实际发布尺寸完成单张价值、整套一致性和手机端可读性验收。任一验证失败时修正后重跑；无法修正则返回 `BLOCKED`。验证脚本通过只说明正文信息图的基础版面密度一致，不证明事实天然正确、视觉天然优秀或用户价值成立；执行者仍必须完成官方来源语义核验、对应发布场景的手机端目视检查和独立用户测试。
 
@@ -218,10 +231,10 @@ python3 scripts/check_article_image_scale.py path/to/header.png path/to/remotion
 1. 以约 390px 宽度检查中文、图片、滚动、间距、外框和横向溢出；
    - 正文插图必须在不点击放大的状态下完整显示；点击后才完整视为失败；
    - 图片保持原始宽高比并自适应正文宽度，图片与容器不得裁切或隐藏左右内容；
-   - 检查对象必须是“一键复制后粘贴到空白富文本接收区”的结果，不得只截图原始 HTML；逐张确认顶部图、正文信息图和底部图的主体宽度与文字可读性；
+   - 文章 HTML 不得生成页面内复制控件、顶部预览工具栏或 Clipboard 脚本；检查对象必须是实际导入微信草稿箱并保存后重新打开的结果，不得只截图原始 HTML；逐张确认顶部图、正文信息图和底部图的主体宽度与文字可读性；
 2. 提供可直接打开的在线网页预览；普通文件链接或静态长截图不得冒充在线预览。在线预览不可用时，明确说明原因，并同时提供 HTML 文件和实际手机端预览图。
 
-首次使用或更换文章首图、正文信息图模板、尾图、图片内嵌方式或复制逻辑时，本地检查通过后仍只可标记为 `DRAFT_PASS`，直到用户把完整正文粘贴进微信草稿箱、保存后重新打开并发送手机预览，确认图片未丢失、未变小、未裁切且文字可读。一次微信实测通过后，可以复用同一组未变更的资产和导入模板；任一相关资产、尺寸、样式或复制逻辑变化后必须重新实测。
+首次使用或更换文章首图、正文信息图模板、尾图、图片内嵌方式或导入逻辑时，本地检查通过后仍只可标记为 `DRAFT_PASS`，直到用户把完整正文导入微信草稿箱、保存后重新打开并发送手机预览，确认图片未丢失、未变小、未裁切且文字可读。一次微信实测通过后，可以复用同一组未变更的资产和导入模板；任一相关资产、尺寸、样式或导入逻辑变化后必须重新实测。
 
 微信编辑器规则变化、复杂模板复制失败或现有样式无法稳定保留时，不得把“更新 Skill”当作备用发布方式，也不得因此停止交付。立即读取 [article-mobile-layout.md](references/article-mobile-layout.md) 的“微信模板失效时的降级发布”，保留已核验正文和锁定品牌资产，移除不稳定的复杂样式，降级为微信原生基础排版并重新完成草稿箱与手机端验收。只有降级方案实测通过后，才把新兼容规则写回 Skill。
 

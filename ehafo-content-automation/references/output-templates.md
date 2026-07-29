@@ -151,6 +151,29 @@
 
 ## 4. 统一输出包
 
+涉及图片生成或修改时，验证包必须包含四道硬门禁记录：
+
+```json
+{
+  "production_gates": {
+    "declared_before_generation": true,
+    "asset_type": "article_illustration",
+    "template_type": "article_illustration",
+    "scope_verified": true,
+    "locked_assets_verified": true,
+    "acceptance": {
+      "content_accuracy": "pass",
+      "readable_size": "pass",
+      "aspect_ratio": "pass",
+      "asset_integrity": "pass",
+      "mobile_preview": "pass"
+    }
+  }
+}
+```
+
+文章正文插图使用 `article_illustration`，服务号贴图使用 `service_account_cards`。`scope_verified` 和 `locked_assets_verified` 必须来自 `scripts/verify_edit_scope.py verify` 的成功结果，不得凭人工声明填写。
+
 输出内容必须服从形式门禁，不固定包含三种形式：
 
 ```text
