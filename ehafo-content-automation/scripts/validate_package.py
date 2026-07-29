@@ -59,6 +59,10 @@ BRAND_PROMO_ASSET = "assets/ehafo-brand-promo.png"
 BRAND_PROMO_SHA256 = (
     "56f998e0802d34b23077036160f380e4fd14bda1fbf5e192fae8222f69f1343c"
 )
+LOCKED_ARTICLE_ASSETS = {
+    "assets/ehafo-article-header.png",
+    "assets/ehafo-article-footer.png",
+}
 ALLOWED_ASSET_TYPES = {"article_illustration", "service_account_cards"}
 ACCEPTANCE_DIMENSIONS = (
     "content_accuracy", "readable_size", "aspect_ratio",
@@ -104,6 +108,37 @@ def validate_production_gates(gates: object) -> list[str]:
                 errors.append(
                     f"production_gates:acceptance_not_passed:{dimension}"
                 )
+    return errors
+
+
+def validate_article_illustrations(article: object) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(article, dict):
+        return ["article:must_be_object"]
+
+    illustrations = article.get("illustrations")
+    if not isinstance(illustrations, list) or not 1 <= len(illustrations) <= 2:
+        return ["article:body_illustrations_must_be_1_to_2"]
+
+    paths: list[str] = []
+    for index, illustration in enumerate(illustrations):
+        prefix = f"article.illustrations[{index}]"
+        if not isinstance(illustration, dict):
+            errors.append(f"{prefix}:must_be_object")
+            continue
+        path = str(illustration.get("path", "")).strip()
+        unique_information = str(
+            illustration.get("unique_information", "")
+        ).strip()
+        if not path:
+            errors.append(f"{prefix}:path_required")
+        elif path in LOCKED_ARTICLE_ASSETS:
+            errors.append(f"{prefix}:locked_brand_asset_not_counted")
+        if visible_length(unique_information) < 6:
+            errors.append(f"{prefix}:unique_information_required")
+        paths.append(path)
+    if len(paths) != len(set(paths)):
+        errors.append("article:illustration_paths_must_be_unique")
     return errors
 
 
@@ -396,6 +431,9 @@ def main() -> int:
         selected = []
     if isinstance(outputs, dict) and set(outputs) != set(selected):
         errors.append("outputs_must_match_selected_formats")
+
+    if "article" in selected and isinstance(outputs, dict):
+        errors.extend(validate_article_illustrations(outputs.get("article")))
 
     rejected = decision.get("rejected", {}) if isinstance(decision, dict) else {}
     expected_rejected = allowed_formats - set(selected)

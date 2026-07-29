@@ -48,6 +48,62 @@ class ProductionGateTests(unittest.TestCase):
             validate_package.validate_production_gates(gate),
         )
 
+    def test_article_rejects_zero_body_illustrations(self):
+        self.assertIn(
+            "article:body_illustrations_must_be_1_to_2",
+            validate_package.validate_article_illustrations({"illustrations": []}),
+        )
+
+    def test_article_accepts_one_or_two_body_illustrations(self):
+        one = {
+            "illustrations": [
+                {
+                    "path": "output/rule-path.png",
+                    "unique_information": "展示规则核对的先后路径",
+                }
+            ]
+        }
+        two = {
+            "illustrations": [
+                {
+                    "path": "output/rule-path.png",
+                    "unique_information": "展示规则核对的先后路径",
+                },
+                {
+                    "path": "output/evidence-chain.png",
+                    "unique_information": "展示成果与证明材料的对应关系",
+                },
+            ]
+        }
+        self.assertEqual(validate_package.validate_article_illustrations(one), [])
+        self.assertEqual(validate_package.validate_article_illustrations(two), [])
+
+    def test_article_rejects_three_body_illustrations(self):
+        article = {
+            "illustrations": [
+                {"path": f"output/figure-{index}.png", "unique_information": f"独有信息{index}"}
+                for index in range(3)
+            ]
+        }
+        self.assertIn(
+            "article:body_illustrations_must_be_1_to_2",
+            validate_package.validate_article_illustrations(article),
+        )
+
+    def test_article_rejects_locked_brand_assets_as_body_illustrations(self):
+        article = {
+            "illustrations": [
+                {
+                    "path": "assets/ehafo-article-header.png",
+                    "unique_information": "品牌顶部图",
+                }
+            ]
+        }
+        self.assertIn(
+            "article.illustrations[0]:locked_brand_asset_not_counted",
+            validate_package.validate_article_illustrations(article),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
