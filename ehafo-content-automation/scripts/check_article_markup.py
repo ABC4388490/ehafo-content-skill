@@ -21,6 +21,7 @@ class ArticleMarkupParser(HTMLParser):
         self.green_items: list[dict[str, object]] = []
         self.highlight_items: list[dict[str, object]] = []
         self.paragraph_green_counts: list[int] = []
+        self.visible_text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key: value or "" for key, value in attrs}
@@ -64,6 +65,7 @@ class ArticleMarkupParser(HTMLParser):
             self.stack[-1]["text"].extend(item["text"])
 
     def handle_data(self, data: str) -> None:
+        self.visible_text.append(data)
         for item in self.stack:
             item["text"].append(data)
 
@@ -72,6 +74,11 @@ def validate(path: Path) -> list[str]:
     parser = ArticleMarkupParser()
     parser.feed(path.read_text(encoding="utf-8"))
     errors: list[str] = []
+    visible_text = "".join(parser.visible_text)
+    if "选题来源" in visible_text:
+        errors.append("article:visible_topic_source_forbidden")
+    if "核验日期" in visible_text:
+        errors.append("article:visible_verification_date_forbidden")
 
     for index, item in enumerate(parser.green_items):
         text = "".join(item["text"])

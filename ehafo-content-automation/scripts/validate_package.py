@@ -63,11 +63,30 @@ LOCKED_ARTICLE_ASSETS = {
     "assets/ehafo-article-header.png",
     "assets/ehafo-article-footer.png",
 }
-ALLOWED_ASSET_TYPES = {"article_illustration", "service_account_cards"}
+ALLOWED_ASSET_TYPES = {
+    "article_cover", "article_illustration", "service_account_cards",
+}
 ACCEPTANCE_DIMENSIONS = (
     "content_accuracy", "readable_size", "aspect_ratio",
     "asset_integrity", "mobile_preview",
 )
+COVER_PALETTES = {
+    "action_green": {
+        "background_color": "#175941",
+        "primary_color": "#FFFDF6",
+        "accent_color": "#F6D96B",
+    },
+    "notice_blue": {
+        "background_color": "#214E73",
+        "primary_color": "#FFFDF6",
+        "accent_color": "#F6D96B",
+    },
+    "risk_red": {
+        "background_color": "#7A3732",
+        "primary_color": "#FFFDF6",
+        "accent_color": "#F6D96B",
+    },
+}
 
 
 def valid_date(value: object) -> bool:
@@ -82,32 +101,151 @@ def visible_length(value: str) -> int:
     return len(re.sub(r"\s+", "", value))
 
 
-def validate_production_gates(gates: object) -> list[str]:
+def validate_single_production_gate(
+    gates: object, prefix: str = "production_gates"
+) -> list[str]:
     errors: list[str] = []
     if not isinstance(gates, dict):
-        return ["production_gates:must_be_object"]
+        return [f"{prefix}:must_be_object"]
 
     if gates.get("declared_before_generation") is not True:
-        errors.append("production_gates:type_must_be_declared_before_generation")
+        errors.append(f"{prefix}:type_must_be_declared_before_generation")
     asset_type = gates.get("asset_type")
     if asset_type not in ALLOWED_ASSET_TYPES:
-        errors.append("production_gates:invalid_asset_type")
+        errors.append(f"{prefix}:invalid_asset_type")
     if gates.get("template_type") != asset_type:
-        errors.append("production_gates:template_type_must_match_asset_type")
+        errors.append(f"{prefix}:template_type_must_match_asset_type")
     if gates.get("scope_verified") is not True:
-        errors.append("production_gates:edit_scope_not_verified")
+        errors.append(f"{prefix}:edit_scope_not_verified")
     if gates.get("locked_assets_verified") is not True:
-        errors.append("production_gates:locked_assets_not_verified")
+        errors.append(f"{prefix}:locked_assets_not_verified")
 
     acceptance = gates.get("acceptance")
     if not isinstance(acceptance, dict):
-        errors.append("production_gates:acceptance_must_be_object")
+        errors.append(f"{prefix}:acceptance_must_be_object")
     else:
         for dimension in ACCEPTANCE_DIMENSIONS:
             if acceptance.get(dimension) != "pass":
-                errors.append(
-                    f"production_gates:acceptance_not_passed:{dimension}"
-                )
+                errors.append(f"{prefix}:acceptance_not_passed:{dimension}")
+    return errors
+
+
+def validate_production_gates(gates: object) -> list[str]:
+    if isinstance(gates, dict):
+        return validate_single_production_gate(gates)
+    if not isinstance(gates, list) or not gates:
+        return ["production_gates:must_be_object_or_nonempty_list"]
+
+    errors: list[str] = []
+    asset_types: list[str] = []
+    for index, gate in enumerate(gates):
+        errors.extend(
+            validate_single_production_gate(gate, f"production_gates[{index}]")
+        )
+        if isinstance(gate, dict) and isinstance(gate.get("asset_type"), str):
+            asset_types.append(gate["asset_type"])
+    for asset_type in sorted(set(asset_types)):
+        if asset_types.count(asset_type) > 1:
+            errors.append(f"production_gates:duplicate_asset_type:{asset_type}")
+    return errors
+
+
+def declared_asset_types(gates: object) -> set[str]:
+    items = gates if isinstance(gates, list) else [gates]
+    return {
+        str(item.get("asset_type"))
+        for item in items
+        if isinstance(item, dict) and item.get("asset_type") in ALLOWED_ASSET_TYPES
+    }
+
+
+def relative_luminance(hex_color: str) -> float | None:
+    if not re.fullmatch(r"#[0-9A-Fa-f]{6}", hex_color):
+        return None
+    channels = [int(hex_color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [
+        value / 12.92
+        if value <= 0.04045
+        else ((value + 0.055) / 1.055) ** 2.4
+        for value in channels
+    ]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrast_ratio(first: str, second: str) -> float | None:
+    first_luminance = relative_luminance(first)
+    second_luminance = relative_luminance(second)
+    if first_luminance is None or second_luminance is None:
+        return None
+    lighter, darker = sorted(
+        (first_luminance, second_luminance), reverse=True
+    )
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def validate_article_cover(cover: object) -> list[str]:
+    if not isinstance(cover, dict):
+        return ["article.cover:must_be_object"]
+
+    errors: list[str] = []
+    if cover.get("publication_role") != "article_cover":
+        errors.append("article.cover:invalid_publication_role")
+    cover_copy = str(cover.get("cover_copy", "")).strip()
+    if not 6 <= visible_length(cover_copy) <= 14:
+        errors.append("article.cover:cover_copy_must_be_6_to_14_chars")
+    title = str(cover.get("title", "")).strip()
+    if not title or visible_length(title) > 64:
+        errors.append("article.cover:title_must_be_1_to_64_chars")
+    digest = str(cover.get("digest", "")).strip()
+    if not digest:
+        errors.append("article.cover:digest_required")
+    elif visible_length(digest) > 120:
+        errors.append("article.cover:digest_exceeds_120")
+
+    paths: list[str] = []
+    for name, expected_size in (("wide", (900, 383)), ("square", (500, 500))):
+        image = cover.get(name)
+        prefix = f"article.cover.{name}"
+        if not isinstance(image, dict):
+            errors.append(f"{prefix}:must_be_object")
+            continue
+        path = str(image.get("path", "")).strip()
+        if not path.lower().endswith(".png"):
+            errors.append(f"{prefix}:png_path_required")
+        paths.append(path)
+        if (image.get("width"), image.get("height")) != expected_size:
+            errors.append(
+                f"{prefix}:must_be_{expected_size[0]}x{expected_size[1]}"
+            )
+    if len(paths) == 2 and paths[0] == paths[1]:
+        errors.append("article.cover:wide_and_square_paths_must_differ")
+
+    visual_spec = cover.get("visual_spec")
+    if not isinstance(visual_spec, dict):
+        errors.append("article.cover:visual_spec_must_be_object")
+    else:
+        if visual_spec.get("background_type") != "solid":
+            errors.append("article.cover:background_must_be_solid")
+        palette_id = str(visual_spec.get("palette_id", ""))
+        palette = COVER_PALETTES.get(palette_id)
+        if palette is None:
+            errors.append("article.cover:unknown_palette_id")
+        elif any(
+            visual_spec.get(key) != value for key, value in palette.items()
+        ):
+            errors.append(
+                f"article.cover:palette_colors_must_match:{palette_id}"
+            )
+        background = str(visual_spec.get("background_color", ""))
+        for name in ("primary", "accent"):
+            color = str(visual_spec.get(f"{name}_color", ""))
+            ratio = contrast_ratio(color, background)
+            if ratio is None:
+                errors.append(f"article.cover:{name}_color_must_be_hex")
+            elif ratio < 4.5:
+                errors.append(f"article.cover:{name}_contrast_below_4_5")
+    if cover.get("thumbnail_readability") != "pass":
+        errors.append("article.cover:thumbnail_readability_not_passed")
     return errors
 
 
@@ -158,7 +296,9 @@ def main() -> int:
         if key not in data or data[key] in (None, "", []):
             errors.append(f"missing:{key}")
 
-    errors.extend(validate_production_gates(data.get("production_gates")))
+    production_gates = data.get("production_gates")
+    errors.extend(validate_production_gates(production_gates))
+    asset_types = declared_asset_types(production_gates)
 
     status = data.get("status")
     allowed_statuses = {
@@ -433,7 +573,13 @@ def main() -> int:
         errors.append("outputs_must_match_selected_formats")
 
     if "article" in selected and isinstance(outputs, dict):
-        errors.extend(validate_article_illustrations(outputs.get("article")))
+        article = outputs.get("article")
+        errors.extend(validate_article_illustrations(article))
+        cover = article.get("cover") if isinstance(article, dict) else None
+        if "article_cover" in asset_types:
+            errors.extend(validate_article_cover(cover))
+        elif cover is not None:
+            errors.append("article.cover:production_gate_required")
 
     rejected = decision.get("rejected", {}) if isinstance(decision, dict) else {}
     expected_rejected = allowed_formats - set(selected)

@@ -9,7 +9,7 @@
 
 ## 1. 考讯
 
-标题原则上不超过 20 个汉字，直接包含考试与核心事项。
+标题优先使用 12—26 个汉字，直接包含考试与核心事项，并保持在平台 64 字上限内。
 
 结构：
 
@@ -28,7 +28,7 @@
 
 ## 2. 文章
 
-标题原则上不超过 20 个汉字。摘要说明读者能解决什么问题。制作正文和 HTML 时同时遵守 [article-mobile-layout.md](article-mobile-layout.md)。
+标题优先使用 12—26 个汉字并保持在平台 64 字上限内。摘要直接给出核心结论、适用边界和读者能解决的问题。制作正文和 HTML 时同时遵守 [article-mobile-layout.md](article-mobile-layout.md)。
 
 结构：
 
@@ -40,9 +40,11 @@
 6. 说明最常见错误及后果；
 7. 给出符合真实备考或办理阶段的下一步行动；只有存在经核验的当天截止、当天开放或即时风险时，才可使用“今天完成”；
 8. 一个自然 CTA；
-9. 官方来源、适用范围和核验日期。
+9. 官方来源和必要适用范围。核验日期只保存在内部事实卡与验证包，不写入用户可见文章。
 
 标题优先复现用户会直接搜索或询问的问题，不把更模糊的编辑观点当作标题。避免为了篇幅重复事实；同一结论在开头讲清后，后文转入判断或行动。普通正文、重点句、引用规则、图片和留白必须交替形成阅读节奏，不得连续堆放同一种文本模块。
+
+交付前逐段执行独立价值检查：每段只能以新结论、适用边界、判断标准、执行动作或必要证据为主要作用；无法标记，或与前文作用和事实相同的段落直接删除。用户可见正文、HTML 与微信草稿不得出现“选题来源”和“核验日期”；这两项只留在内部事实卡、验证包和交接记录中。
 
 本地预览在标题和摘要之后、正文首段之前原样放置 `assets/ehafo-article-header.png`；正式写入微信时标题和摘要使用独立字段，因此顶部图仍是正文第一项。正文结束后原样放置 `assets/ehafo-article-footer.png`。两张固定品牌图不计入正文信息图数量，也不得替代内容模块。
 
@@ -157,34 +159,74 @@
 
 ## 4. 统一输出包
 
-涉及图片生成或修改时，验证包必须包含四道硬门禁记录：
+涉及图片生成或修改时，验证包必须包含四道硬门禁记录。只有一种图片时可保留单个对象；文章同时生成封面和正文插图时使用数组逐类登记：
 
 ```json
 {
-  "production_gates": {
-    "declared_before_generation": true,
-    "asset_type": "article_illustration",
-    "template_type": "article_illustration",
-    "scope_verified": true,
-    "locked_assets_verified": true,
-    "acceptance": {
-      "content_accuracy": "pass",
-      "readable_size": "pass",
-      "aspect_ratio": "pass",
-      "asset_integrity": "pass",
-      "mobile_preview": "pass"
+  "production_gates": [
+    {
+      "declared_before_generation": true,
+      "asset_type": "article_cover",
+      "template_type": "article_cover",
+      "scope_verified": true,
+      "locked_assets_verified": true,
+      "acceptance": {
+        "content_accuracy": "pass",
+        "readable_size": "pass",
+        "aspect_ratio": "pass",
+        "asset_integrity": "pass",
+        "mobile_preview": "pass"
+      }
+    },
+    {
+      "declared_before_generation": true,
+      "asset_type": "article_illustration",
+      "template_type": "article_illustration",
+      "scope_verified": true,
+      "locked_assets_verified": true,
+      "acceptance": {
+        "content_accuracy": "pass",
+        "readable_size": "pass",
+        "aspect_ratio": "pass",
+        "asset_integrity": "pass",
+        "mobile_preview": "pass"
+      }
     }
-  }
+  ]
 }
 ```
 
-文章正文插图使用 `article_illustration`，服务号贴图使用 `service_account_cards`。`scope_verified` 和 `locked_assets_verified` 必须来自 `scripts/verify_edit_scope.py verify` 的成功结果，不得凭人工声明填写。
+文章封面使用 `article_cover`，文章正文插图使用 `article_illustration`，服务号贴图使用 `service_account_cards`。同类类型不得重复登记。`scope_verified` 和 `locked_assets_verified` 必须来自 `scripts/verify_edit_scope.py verify` 的成功结果，不得凭人工声明填写。
 
 选择 `article` 时，`outputs.article` 必须登记正文插图：
 
 ```json
 {
   "article": {
+    "cover": {
+      "publication_role": "article_cover",
+      "cover_copy": "先查4层文件",
+      "title": "申报正高，论文还必须发吗？",
+      "digest": "国家政策已明确破除唯论文，但具体申报要求仍要按地区、系列、单位和年度通知逐层核对。",
+      "wide": {
+        "path": "output/cover-wide.png",
+        "width": 900,
+        "height": 383
+      },
+      "square": {
+        "path": "output/cover-square.png",
+        "width": 500,
+        "height": 500
+      },
+      "visual_spec": {
+        "background_type": "solid",
+        "palette_id": "action_green",
+        "background_color": "#175941",
+        "primary_color": "#FFFDF6",
+        "accent_color": "#F6D96B"
+      },
+      "thumbnail_readability": "pass"
+    },
     "illustrations": [
       {
         "path": "output/rule-path.png",
@@ -195,7 +237,7 @@
 }
 ```
 
-`illustrations` 只能有 1—2 项，路径不得重复，也不得填写固定顶部图或底部图。
+`cover` 在声明 `article_cover` 时必填；横版和方版必须使用不同 PNG 路径。`palette_id` 只能是 `action_green`、`notice_blue` 或 `risk_red`，对应色值不可修改，颜色对比度由验证脚本重新计算。`illustrations` 只能有 1—2 项，路径不得重复，也不得填写固定顶部图或底部图。
 
 输出内容必须服从形式门禁，不固定包含三种形式：
 

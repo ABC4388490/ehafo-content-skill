@@ -45,6 +45,17 @@ class ArticleMarkupTest(unittest.TestCase):
         self.assertIn("key-green[1]:forbidden_region", errors)
         self.assertIn("key-green[2]:forbidden_region", errors)
 
+    def test_rejects_internal_provenance_in_visible_article(self) -> None:
+        html = """
+        <section>
+          <p>选题来源：易哈佛问题中心</p>
+          <p>核验日期：2026年7月30日</p>
+        </section>
+        """
+        errors = self.validate(html)
+        self.assertIn("article:visible_topic_source_forbidden", errors)
+        self.assertIn("article:visible_verification_date_forbidden", errors)
+
 
 if __name__ == "__main__":
     unittest.main()
