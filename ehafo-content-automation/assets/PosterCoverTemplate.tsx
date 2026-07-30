@@ -28,19 +28,27 @@ type PaletteId = keyof typeof palettes;
 
 type PosterCoverProps = {
   eyebrow: string;
-  headlineLines: Segment[][];
+  headline: Segment[];
   format: "wide" | "square";
   paletteId?: PaletteId;
 };
 
 export const PosterCover: React.FC<PosterCoverProps> = ({
   eyebrow,
-  headlineLines,
+  headline,
   format,
   paletteId = "action_green",
 }) => {
   const square = format === "square";
   const { backgroundColor, primaryColor, accentColor } = palettes[paletteId];
+  const headlineLength = headline.reduce(
+    (length, segment) => length + Array.from(segment.text).length,
+    0,
+  );
+  const headlineFontSize = Math.min(
+    square ? 82 : 86,
+    Math.floor(((square ? 404 : 756) * 0.92) / Math.max(headlineLength, 1)),
+  );
 
   return (
     <AbsoluteFill
@@ -61,23 +69,20 @@ export const PosterCover: React.FC<PosterCoverProps> = ({
 
       <div
         style={{
-          fontSize: square ? 82 : 86,
-          lineHeight: square ? 1.12 : 1.08,
+          fontSize: headlineFontSize,
+          lineHeight: 1.08,
           fontWeight: 700,
           letterSpacing: 0,
+          whiteSpace: "nowrap",
         }}
       >
-        {headlineLines.map((line, lineIndex) => (
-          <div key={lineIndex}>
-            {line.map((segment, segmentIndex) => (
-              <span
-                key={`${lineIndex}-${segmentIndex}`}
-                style={{ color: segment.accent ? accentColor : primaryColor }}
-              >
-                {segment.text}
-              </span>
-            ))}
-          </div>
+        {headline.map((segment, segmentIndex) => (
+          <span
+            key={segmentIndex}
+            style={{ color: segment.accent ? accentColor : primaryColor }}
+          >
+            {segment.text}
+          </span>
         ))}
       </div>
     </AbsoluteFill>

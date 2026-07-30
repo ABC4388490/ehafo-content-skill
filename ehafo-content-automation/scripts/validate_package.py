@@ -23,7 +23,7 @@ BANNED_MARKETING = (
 REQUIRED_TOP = (
     "status", "topic", "audience", "problem", "action", "verification_date",
     "claims", "topic_selection", "user_task", "user_test", "value_evidence",
-    "format_decision", "production_gates", "outputs",
+    "acceptance_gate", "format_decision", "production_gates", "outputs",
 )
 REQUIRED_CLAIM = (
     "id", "text", "risk", "exam", "year", "region", "official",
@@ -69,6 +69,18 @@ ALLOWED_ASSET_TYPES = {
 ACCEPTANCE_DIMENSIONS = (
     "content_accuracy", "readable_size", "aspect_ratio",
     "asset_integrity", "mobile_preview",
+)
+ACCEPTANCE_GATE_DIMENSIONS = (
+    "core_task_complete",
+    "promise_alignment",
+    "fact_scope",
+    "actionability",
+    "unresolved_questions",
+    "single_thread_and_necessity",
+    "image_text_division",
+    "mobile_readability",
+    "brand_asset_integrity",
+    "delivery_integrity",
 )
 COVER_PALETTES = {
     "action_green": {
@@ -150,6 +162,50 @@ def validate_production_gates(gates: object) -> list[str]:
     return errors
 
 
+def validate_acceptance_gate(gate: object, status: object) -> list[str]:
+    if not isinstance(gate, dict):
+        return ["acceptance_gate:must_be_object"]
+
+    errors: list[str] = []
+    expected = set(ACCEPTANCE_GATE_DIMENSIONS)
+    actual = set(map(str, gate))
+    for dimension in sorted(expected - actual):
+        errors.append(f"acceptance_gate:missing:{dimension}")
+    for dimension in sorted(actual - expected):
+        errors.append(f"acceptance_gate:unknown:{dimension}")
+
+    results: dict[str, str] = {}
+    for dimension in ACCEPTANCE_GATE_DIMENSIONS:
+        item = gate.get(dimension)
+        prefix = f"acceptance_gate.{dimension}"
+        if not isinstance(item, dict):
+            if dimension in actual:
+                errors.append(f"{prefix}:must_be_object")
+            continue
+        result = str(item.get("result", ""))
+        results[dimension] = result
+        if result not in {"pass", "revise", "blocked"}:
+            errors.append(f"{prefix}:invalid_result")
+        if visible_length(str(item.get("evidence", ""))) < 8:
+            errors.append(f"{prefix}:evidence_required")
+
+    if status in {"VALUE_UNPROVEN", "AUTO_RELEASE"}:
+        for dimension, result in results.items():
+            if result != "pass":
+                errors.append(
+                    f"acceptance_gate:release_requires_pass:{dimension}"
+                )
+    elif status == "DRAFT_PASS":
+        if "revise" not in results.values():
+            errors.append("acceptance_gate:draft_requires_revise")
+        if "blocked" in results.values():
+            errors.append("acceptance_gate:draft_cannot_contain_blocked")
+    elif status == "BLOCKED" and "blocked" not in results.values():
+        errors.append("acceptance_gate:blocked_requires_blocked_result")
+
+    return errors
+
+
 def declared_asset_types(gates: object) -> set[str]:
     items = gates if isinstance(gates, list) else [gates]
     return {
@@ -191,8 +247,10 @@ def validate_article_cover(cover: object) -> list[str]:
     if cover.get("publication_role") != "article_cover":
         errors.append("article.cover:invalid_publication_role")
     cover_copy = str(cover.get("cover_copy", "")).strip()
-    if not 6 <= visible_length(cover_copy) <= 14:
-        errors.append("article.cover:cover_copy_must_be_6_to_14_chars")
+    if "\n" in cover_copy or "\r" in cover_copy:
+        errors.append("article.cover:cover_copy_must_be_single_line")
+    if not 6 <= visible_length(cover_copy) <= 10:
+        errors.append("article.cover:cover_copy_must_be_6_to_10_chars")
     title = str(cover.get("title", "")).strip()
     if not title or visible_length(title) > 64:
         errors.append("article.cover:title_must_be_1_to_64_chars")
@@ -255,8 +313,8 @@ def validate_article_illustrations(article: object) -> list[str]:
         return ["article:must_be_object"]
 
     illustrations = article.get("illustrations")
-    if not isinstance(illustrations, list) or not 1 <= len(illustrations) <= 2:
-        return ["article:body_illustrations_must_be_1_to_2"]
+    if not isinstance(illustrations, list) or len(illustrations) > 2:
+        return ["article:body_illustrations_must_be_0_to_2"]
 
     paths: list[str] = []
     for index, illustration in enumerate(illustrations):
@@ -277,6 +335,64 @@ def validate_article_illustrations(article: object) -> list[str]:
         paths.append(path)
     if len(paths) != len(set(paths)):
         errors.append("article:illustration_paths_must_be_unique")
+    return errors
+
+
+def validate_article_structure(structure: object) -> list[str]:
+    if not isinstance(structure, dict):
+        return ["article.structure:must_be_object"]
+
+    errors: list[str] = []
+    if visible_length(str(structure.get("core_question", ""))) < 6:
+        errors.append("article.structure:core_question_required")
+
+    out_of_scope = structure.get("out_of_scope")
+    if (
+        not isinstance(out_of_scope, list)
+        or not out_of_scope
+        or any(visible_length(str(item)) < 4 for item in out_of_scope)
+    ):
+        errors.append("article.structure:out_of_scope_required")
+
+    modules = structure.get("modules")
+    if not isinstance(modules, list) or not modules:
+        return errors + ["article.structure:modules_required"]
+
+    allowed_necessity = {"required", "supplementary"}
+    allowed_task_types = {
+        "conclusion", "boundary", "decision", "action", "evidence", "exception",
+    }
+    module_ids: list[str] = []
+    supplementary_seen = False
+    required_count = 0
+    for index, module in enumerate(modules):
+        prefix = f"article.structure.modules[{index}]"
+        if not isinstance(module, dict):
+            errors.append(f"{prefix}:must_be_object")
+            continue
+        module_id = str(module.get("module_id", "")).strip()
+        module_ids.append(module_id)
+        if not module_id:
+            errors.append(f"{prefix}:module_id_required")
+        necessity = module.get("necessity")
+        if necessity not in allowed_necessity:
+            errors.append(f"{prefix}:invalid_necessity")
+        elif necessity == "supplementary":
+            supplementary_seen = True
+        else:
+            required_count += 1
+            if supplementary_seen:
+                errors.append("article.structure:required_module_after_supplementary")
+        if visible_length(str(module.get("task", ""))) < 6:
+            errors.append(f"{prefix}:task_required")
+        task_type = module.get("task_type")
+        if not isinstance(task_type, str) or task_type not in allowed_task_types:
+            errors.append(f"{prefix}:exactly_one_task_type_required")
+
+    if len(module_ids) != len(set(module_ids)):
+        errors.append("article.structure:duplicate_module_id")
+    if required_count == 0:
+        errors.append("article.structure:required_module_missing")
     return errors
 
 
@@ -306,6 +422,8 @@ def main() -> int:
     }
     if status not in allowed_statuses:
         errors.append("invalid:status")
+
+    errors.extend(validate_acceptance_gate(data.get("acceptance_gate"), status))
 
     user_task = data.get("user_task", {})
     if not isinstance(user_task, dict):
@@ -575,6 +693,8 @@ def main() -> int:
     if "article" in selected and isinstance(outputs, dict):
         article = outputs.get("article")
         errors.extend(validate_article_illustrations(article))
+        structure = article.get("structure") if isinstance(article, dict) else None
+        errors.extend(validate_article_structure(structure))
         cover = article.get("cover") if isinstance(article, dict) else None
         if "article_cover" in asset_types:
             errors.extend(validate_article_cover(cover))

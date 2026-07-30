@@ -8,6 +8,10 @@ import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlparse
+
+
+FIXED_FOOTER_TARGET = "https://quiz.yiqizuoti.com/index-94528774.html#/quiz/index"
 
 
 def visible_length(value: str) -> int:
@@ -22,9 +26,27 @@ class ArticleMarkupParser(HTMLParser):
         self.highlight_items: list[dict[str, object]] = []
         self.paragraph_green_counts: list[int] = []
         self.visible_text: list[str] = []
+        self.links: list[str] = []
+        self.fixed_footer_links: list[str | None] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key: value or "" for key, value in attrs}
+        if tag == "a" and values.get("href"):
+            self.links.append(values["href"])
+        if tag == "img":
+            source = values.get("src", "")
+            if "ARTICLE_FOOTER_URL" in source or source.endswith(
+                "ehafo-article-footer.png"
+            ):
+                active_link = next(
+                    (
+                        str(parent["href"])
+                        for parent in reversed(self.stack)
+                        if parent["tag"] == "a" and parent["href"]
+                    ),
+                    None,
+                )
+                self.fixed_footer_links.append(active_link)
         classes = set(values.get("class", "").split())
         parent_tags = {str(parent["tag"]) for parent in self.stack}
         parent_classes = {
@@ -36,6 +58,7 @@ class ArticleMarkupParser(HTMLParser):
             "tag": tag,
             "classes": classes,
             "style": values.get("style", "").lower().replace(" ", ""),
+            "href": values.get("href", ""),
             "text": [],
             "green_count": 0,
             "forbidden_green_region": bool(
@@ -79,6 +102,28 @@ def validate(path: Path) -> list[str]:
         errors.append("article:visible_topic_source_forbidden")
     if "核验日期" in visible_text:
         errors.append("article:visible_verification_date_forbidden")
+    if any(
+        phrase in visible_text
+        for phrase in ("内容参考", "参考文章", "本文参考", "参考了")
+    ):
+        errors.append("article:visible_content_reference_forbidden")
+    nonofficial_source_link = False
+    for link in parser.links:
+        parsed = urlparse(link)
+        host = parsed.netloc.lower()
+        if host == "mp.weixin.qq.com" or (
+            host in {"ehafo.com", "www.ehafo.com"}
+            and parsed.path.startswith("/exam/questions/")
+        ):
+            nonofficial_source_link = True
+    if nonofficial_source_link:
+        errors.append("article:visible_nonofficial_source_link_forbidden")
+
+    for link in parser.fixed_footer_links:
+        if link is None:
+            errors.append("article:fixed_footer_link_missing")
+        elif link != FIXED_FOOTER_TARGET:
+            errors.append("article:fixed_footer_link_target_invalid")
 
     for index, item in enumerate(parser.green_items):
         text = "".join(item["text"])

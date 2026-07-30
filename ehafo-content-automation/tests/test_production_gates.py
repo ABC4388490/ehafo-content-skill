@@ -11,6 +11,55 @@ SPEC.loader.exec_module(validate_package)
 
 
 class ProductionGateTests(unittest.TestCase):
+    def valid_acceptance_gate(self):
+        return {
+            dimension: {
+                "result": "pass",
+                "evidence": f"{dimension}已完成可核验的成品检查",
+            }
+            for dimension in validate_package.ACCEPTANCE_GATE_DIMENSIONS
+        }
+
+    def test_accepts_complete_universal_acceptance_gate(self):
+        self.assertEqual(
+            validate_package.validate_acceptance_gate(
+                self.valid_acceptance_gate(), "VALUE_UNPROVEN"
+            ),
+            [],
+        )
+
+    def test_release_rejects_missing_or_unpassed_acceptance_dimension(self):
+        gate = self.valid_acceptance_gate()
+        gate.pop("delivery_integrity")
+        gate["mobile_readability"]["result"] = "revise"
+        errors = validate_package.validate_acceptance_gate(
+            gate, "VALUE_UNPROVEN"
+        )
+        self.assertIn(
+            "acceptance_gate:missing:delivery_integrity",
+            errors,
+        )
+        self.assertIn(
+            "acceptance_gate:release_requires_pass:mobile_readability",
+            errors,
+        )
+
+    def test_draft_requires_revise_and_blocked_requires_blocked_result(self):
+        gate = self.valid_acceptance_gate()
+        self.assertIn(
+            "acceptance_gate:draft_requires_revise",
+            validate_package.validate_acceptance_gate(gate, "DRAFT_PASS"),
+        )
+        gate["unresolved_questions"]["result"] = "revise"
+        self.assertEqual(
+            validate_package.validate_acceptance_gate(gate, "DRAFT_PASS"),
+            [],
+        )
+        self.assertIn(
+            "acceptance_gate:blocked_requires_blocked_result",
+            validate_package.validate_acceptance_gate(gate, "BLOCKED"),
+        )
+
     def valid_gate(self):
         return {
             "declared_before_generation": True,
@@ -64,10 +113,10 @@ class ProductionGateTests(unittest.TestCase):
             validate_package.validate_production_gates([gate, gate.copy()]),
         )
 
-    def test_article_rejects_zero_body_illustrations(self):
-        self.assertIn(
-            "article:body_illustrations_must_be_1_to_2",
+    def test_article_accepts_zero_body_illustrations(self):
+        self.assertEqual(
             validate_package.validate_article_illustrations({"illustrations": []}),
+            [],
         )
 
     def test_article_accepts_one_or_two_body_illustrations(self):
@@ -102,8 +151,67 @@ class ProductionGateTests(unittest.TestCase):
             ]
         }
         self.assertIn(
-            "article:body_illustrations_must_be_1_to_2",
+            "article:body_illustrations_must_be_0_to_2",
             validate_package.validate_article_illustrations(article),
+        )
+
+    def valid_article_structure(self):
+        return {
+            "core_question": "纸质证书是否轮到本人报名地发放，下一步怎样办理",
+            "out_of_scope": ["不汇总全国各省往年领取方式"],
+            "modules": [
+                {
+                    "module_id": "main-path",
+                    "necessity": "required",
+                    "task": "给出确认并办理纸质证书的唯一主路径",
+                    "task_type": "action",
+                }
+            ],
+        }
+
+    def test_article_structure_accepts_one_required_module(self):
+        self.assertEqual(
+            validate_package.validate_article_structure(
+                self.valid_article_structure()
+            ),
+            [],
+        )
+
+    def test_article_structure_requires_explicit_out_of_scope(self):
+        structure = self.valid_article_structure()
+        structure["out_of_scope"] = []
+        self.assertIn(
+            "article.structure:out_of_scope_required",
+            validate_package.validate_article_structure(structure),
+        )
+
+    def test_article_structure_rejects_multi_task_module(self):
+        structure = self.valid_article_structure()
+        structure["modules"][0]["task_type"] = ["action", "evidence"]
+        self.assertIn(
+            "article.structure.modules[0]:exactly_one_task_type_required",
+            validate_package.validate_article_structure(structure),
+        )
+
+    def test_article_structure_rejects_required_after_supplementary(self):
+        structure = self.valid_article_structure()
+        structure["modules"] = [
+            {
+                "module_id": "exception",
+                "necessity": "supplementary",
+                "task": "说明信息异常时的处理方式",
+                "task_type": "exception",
+            },
+            {
+                "module_id": "main-path",
+                "necessity": "required",
+                "task": "给出确认并办理纸质证书的唯一主路径",
+                "task_type": "action",
+            },
+        ]
+        self.assertIn(
+            "article.structure:required_module_after_supplementary",
+            validate_package.validate_article_structure(structure),
         )
 
     def test_article_rejects_locked_brand_assets_as_body_illustrations(self):
@@ -164,6 +272,21 @@ class ProductionGateTests(unittest.TestCase):
         errors = validate_package.validate_article_cover(cover)
         self.assertIn("article.cover:digest_exceeds_120", errors)
         self.assertIn("article.cover:wide_and_square_paths_must_differ", errors)
+
+    def test_cover_rejects_wrapped_or_overlong_copy(self):
+        cover = self.valid_cover()
+        cover["cover_copy"] = "领取先看\n报名地"
+        self.assertIn(
+            "article.cover:cover_copy_must_be_single_line",
+            validate_package.validate_article_cover(cover),
+        )
+
+        cover = self.valid_cover()
+        cover["cover_copy"] = "卫" * 11
+        self.assertIn(
+            "article.cover:cover_copy_must_be_6_to_10_chars",
+            validate_package.validate_article_cover(cover),
+        )
 
     def test_cover_rejects_unknown_or_modified_palette(self):
         cover = self.valid_cover()
